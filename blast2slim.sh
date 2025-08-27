@@ -340,26 +340,45 @@ final.to_csv(Path(OUTDIR) / "annotation_with_goslim.tsv", sep='\t', index=False)
 print(f"[DONE] Wrote:\n - {full_path}\n - {Path(OUTDIR) / 'annotation_with_goslim.tsv'}")
 
 # Generate summary report
-blast_hits = len(merged[merged['accession'].notna()])
-go_matches = len(merged[merged['go_ids'].notna() & (merged['go_ids'] != '')])
-goslim_matches = len(merged[merged['goslim_ids'].notna() & (merged['goslim_ids'] != '')])
-total_seqs = len(merged)
+blast_hits = len(final[final['accession'].notna()])
+go_matches = len(final[final['go_ids'].notna() & (final['go_ids'] != '')])
+goslim_matches = len(final[final['goslim_ids'].notna() & (final['goslim_ids'] != '')])
+total_seqs = len(final)
 
-# GO-Slim category counts for visualization
+# GO-Slim category counts for visualization (Biological Process only)
 goslim_counts = {}
 if goslim_matches > 0:
-    for _, row in merged[merged['goslim_names'].notna() & (merged['goslim_names'] != '')].iterrows():
+    for _, row in final[final['goslim_names'].notna() & (final['goslim_names'] != '')].iterrows():
         terms = [x.strip() for x in str(row['goslim_names']).split(';') if x.strip()]
         for term in terms:
             goslim_counts[term] = goslim_counts.get(term, 0) + 1
 
+# Filter GO-Slim counts for Biological Process terms only
+bp_goslim_counts = {}
+if goslim_counts:
+    # Get corresponding GO IDs for filtering by namespace
+    for _, row in final[final['goslim_ids'].notna() & (final['goslim_ids'] != '') & 
+                       final['goslim_names'].notna() & (final['goslim_names'] != '')].iterrows():
+        slim_ids = [x.strip() for x in str(row['goslim_ids']).split(';') if x.strip()]
+        slim_names = [x.strip() for x in str(row['goslim_names']).split(';') if x.strip()]
+        
+        for slim_id, slim_name in zip(slim_ids, slim_names):
+            if slim_id in slimdag:
+                term_obj = slimdag[slim_id]
+                # Filter for biological process namespace
+                if hasattr(term_obj, 'namespace') and term_obj.namespace == 'biological_process':
+                    bp_goslim_counts[slim_name] = bp_goslim_counts.get(slim_name, 0) + 1
+
+# Use BP counts for visualization, fall back to all counts if no BP terms
+chart_counts = bp_goslim_counts if bp_goslim_counts else goslim_counts
+
 # Write summary stats for main script
 summary_stats = {
     'total_sequences': total_seqs,
-    'blast_hits': blast_hits, 
+    'blast_hits': blast_hits,
     'go_matches': go_matches,
     'goslim_matches': goslim_matches,
-    'goslim_counts': goslim_counts
+    'goslim_counts': chart_counts  # Use filtered BP counts for chart
 }
 
 import json
@@ -395,15 +414,28 @@ SECONDS=$((DURATION % 60))
 # Read summary stats from Python output
 if [[ -f "${OUTDIR}/summary_stats.json" ]]; then
     # Extract stats using Python
-    python3 - <<SUMMARY_SCRIPT
+    python3 - "${OUTDIR}" "$(basename "${QUERY}")" "${START_DATE}" "${END_DATE}" "${HOURS}h ${MINUTES}m ${SECONDS}s" "${THREADS}" "${DURATION}" "${USE_DIAMOND}" "${MODE}" "$(basename "${BLAST_TSV}")" <<'SUMMARY_SCRIPT'
 import json
+import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 
+# Get arguments from bash
+outdir = sys.argv[1]
+input_basename = sys.argv[2]
+start_time = sys.argv[3]
+end_time = sys.argv[4]
+duration_str = sys.argv[5]
+cpu_count = int(sys.argv[6])
+duration_seconds = int(sys.argv[7])
+use_diamond = sys.argv[8]
+mode = sys.argv[9]
+blast_file = sys.argv[10]
+
 # Load summary statistics
-with open("${OUTDIR}/summary_stats.json", 'r') as f:
+with open(f"{outdir}/summary_stats.json", 'r') as f:
     stats = json.load(f)
 
 # Generate GO-Slim bar chart
@@ -419,22 +451,34 @@ if goslim_counts:
         bars = plt.barh(range(len(terms)), counts, color='steelblue', alpha=0.7)
         plt.yticks(range(len(terms)), [term[:50] + '...' if len(term) > 50 else term for term in terms])
         plt.xlabel('Number of Sequences')
-        plt.title('Top GO-Slim Categories')
+        plt.title('Top GO-Slim Biological Process Categories')
         plt.gca().invert_yaxis()
         plt.tight_layout()
-        plt.savefig("${OUTDIR}/goslim_chart.png", dpi=150, bbox_inches='tight')
+        plt.savefig(f"{outdir}/goslim_chart.png", dpi=150, bbox_inches='tight')
         print("[INFO] Generated GO-Slim chart: goslim_chart.png")
 
-# Generate summary markdown
+# Generate tool info string
+if use_diamond == "true":
+    tool_prefix = "DIAMOND "
+else:
+    tool_prefix = "BLAST+ "
+
+if mode == "blastp":
+    tool_suffix = "BLASTP (protein)"
+else:
+    tool_suffix = "BLASTX (nucleotide)"
+
+tool_info = tool_prefix + tool_suffix
+
 md_content = f"""# Annotation Summary Report
 
 ## Job Information
-- **Input file**: $(basename "${QUERY}")
-- **Start time**: ${START_DATE}
-- **End time**: ${END_DATE}
-- **Duration**: ${HOURS}h ${MINUTES}m ${SECONDS}s
-- **CPUs used**: ${THREADS}
-- **Tool**: {"DIAMOND " if "${USE_DIAMOND}" == "true" else "BLAST+ "}{"BLASTP (protein)" if "${MODE}" == "blastp" else "BLASTX (nucleotide)"}
+- **Input file**: {input_basename}
+- **Start time**: {start_time}
+- **End time**: {end_time}
+- **Duration**: {duration_str}
+- **CPUs used**: {cpu_count}
+- **Tool**: {tool_info}
 
 ## Results Overview
 - **Total sequences**: {stats['total_sequences']:,}
@@ -445,7 +489,7 @@ md_content = f"""# Annotation Summary Report
 ## Output Files
 - **Main results**: annotation_with_goslim.tsv
 - **Full GO data**: annotation_full_go.tsv  
-- **Raw BLAST**: $(basename "${BLAST_TSV}")
+- **Raw BLAST**: {blast_file}
 - **Processing script**: postprocess_uniprot_go.py
 
 """
@@ -469,14 +513,14 @@ else:
 
 md_content += f"""
 ## Performance
-- **BLAST throughput**: {stats['total_sequences']/max(1, ${DURATION}):.1f} sequences/second
-- **Annotation rate**: {stats['blast_hits']/max(1, ${DURATION}):.1f} hits/second
+- **BLAST throughput**: {stats['total_sequences']/max(1, duration_seconds):.1f} sequences/second
+- **Annotation rate**: {stats['blast_hits']/max(1, duration_seconds):.1f} hits/second
 
 ---
-*Generated by blast2slim.sh on {END_DATE}*
+*Generated by blast2slim.sh on {end_time}*
 """
 
-with open("${OUTDIR}/summary.md", 'w') as f:
+with open(f"{outdir}/summary.md", 'w') as f:
     f.write(md_content)
 
 print(f"[INFO] Generated summary report: summary.md")
