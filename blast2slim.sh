@@ -1,20 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Record start time for performance tracking
+START_TIME=$(date +%s)
+START_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
 # Usage:
-#   ./blast2goslim.sh -i query.fasta -o outdir [--protein] [--dbdir path] [--threads N]
+#   ./blast2slim.sh -i query.fasta -o outdir [--protein] [--dbdir path] [--threads N] [--diamond]
+#
+# Input formats supported:
+#   - .fasta, .fa, .fas, .cds (nucleotide or protein sequences)
+#   - HTTP/HTTPS URLs to FASTA files (auto-downloaded)
 #
 # Notes:
 #   - Default assumes nucleotide queries -> BLASTX to Swiss-Prot (reviewed).
-#   - Use --protein if your FASTA is protein -> BLASTP.
-#   - Requires: BLAST+ (makeblastdb, blastx/blastp), curl, gzip, python3 (+ requests, pandas, goatools).
+#   - Use --protein if your input contains protein sequences -> BLASTP.
+#   - Use --diamond for faster searches (especially for large datasets).
+#   - CDS files (.cds) are treated as nucleotide sequences by default.
+#   - Requires: BLAST+ (makeblastdb, blastx/blastp) OR DIAMOND, curl, gzip, python3 (+ requests, pandas, goatools).
 
 # ---------- args ----------
 QUERY=""
 OUTDIR="output"  # base directory now fixed; all run dirs will live under top-level output/
 DBDIR="blastdb"
-THREADS=8
+THREADS=40
 MODE="blastx"   # or blastp with --protein
+USE_DIAMOND=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -23,12 +34,13 @@ while [[ $# -gt 0 ]]; do
     --dbdir) DBDIR="$2"; shift 2;;
     --threads) THREADS="$2"; shift 2;;
     --protein) MODE="blastp"; shift 1;;
+    --diamond) USE_DIAMOND=true; shift 1;;
     *) echo "Unknown arg: $1"; exit 1;;
   esac
 done
 
 if [[ -z "${QUERY}" ]]; then
-        echo "ERROR: Provide -i query.fasta"; exit 1
+    echo "ERROR: Provide input file with -i (supports .fasta, .fa, .fas, .cds, or URL)"; exit 1
 fi
 
 # Normalize user-supplied OUTDIR so it always resides under top-level output/
@@ -93,24 +105,51 @@ if [[ ! -f "${SP_FASTA}" ]]; then
   gunzip -kc "${SP_FASTA_GZ}" > "${SP_FASTA}"
 fi
 
-if [[ ! -f "${SP_DB_PREFIX}.pin" ]]; then
-  echo "[INFO] Building BLAST protein DB..."
-  makeblastdb -in "${SP_FASTA}" -dbtype prot -out "${SP_DB_PREFIX}"
+# Build appropriate database based on tool choice
+if [[ "${USE_DIAMOND}" == "true" ]]; then
+  # DIAMOND database
+  DIAMOND_DB="${DBDIR}/uniprot_sprot.dmnd"
+  if [[ ! -f "${DIAMOND_DB}" ]]; then
+    echo "[INFO] Building DIAMOND protein DB..."
+    diamond makedb --in "${SP_FASTA}" -d "${DBDIR}/uniprot_sprot"
+  fi
+else
+  # BLAST+ database
+  if [[ ! -f "${SP_DB_PREFIX}.pin" ]]; then
+    echo "[INFO] Building BLAST protein DB..."
+    makeblastdb -in "${SP_FASTA}" -dbtype prot -out "${SP_DB_PREFIX}"
+  fi
 fi
 
-# ---------- 2) Run BLAST ----------
+# ---------- 2) Run BLAST/DIAMOND ----------
 BASENAME=$(basename "${QUERY%.*}")
 BLAST_TSV="${OUTDIR}/${BASENAME}.blast.tsv"
 
-# outfmt: qseqid sacc pident length evalue bitscore stitle
-if [[ "${MODE}" == "blastx" ]]; then
-  echo "[INFO] Running BLASTX..."
-  blastx -query "${QUERY}" -db "${SP_DB_PREFIX}" -evalue 1e-20 -num_threads "${THREADS}" \
-         -max_target_seqs 1 -outfmt "6 qseqid sacc pident length evalue bitscore stitle" > "${BLAST_TSV}"
+# Run search with appropriate tool
+if [[ "${USE_DIAMOND}" == "true" ]]; then
+  DIAMOND_DB="${DBDIR}/uniprot_sprot.dmnd"
+  if [[ "${MODE}" == "blastx" ]]; then
+    echo "[INFO] Running DIAMOND BLASTX..."
+    diamond blastx -d "${DIAMOND_DB}" -q "${QUERY}" -o "${BLAST_TSV}" \
+      -e 1e-20 -p "${THREADS}" -k 1 \
+      -f 6 qseqid sseqid pident length evalue bitscore stitle
+  else
+    echo "[INFO] Running DIAMOND BLASTP..."
+    diamond blastp -d "${DIAMOND_DB}" -q "${QUERY}" -o "${BLAST_TSV}" \
+      -e 1e-20 -p "${THREADS}" -k 1 \
+      -f 6 qseqid sseqid pident length evalue bitscore stitle
+  fi
 else
-  echo "[INFO] Running BLASTP..."
-  blastp -query "${QUERY}" -db "${SP_DB_PREFIX}" -evalue 1e-20 -num_threads "${THREADS}" \
-         -max_target_seqs 1 -outfmt "6 qseqid sacc pident length evalue bitscore stitle" > "${BLAST_TSV}"
+  # Standard BLAST+
+  if [[ "${MODE}" == "blastx" ]]; then
+    echo "[INFO] Running BLASTX..."
+    blastx -query "${QUERY}" -db "${SP_DB_PREFIX}" -evalue 1e-20 -num_threads "${THREADS}" \
+           -max_target_seqs 1 -outfmt "6 qseqid sacc pident length evalue bitscore stitle" > "${BLAST_TSV}"
+  else
+    echo "[INFO] Running BLASTP..."
+    blastp -query "${QUERY}" -db "${SP_DB_PREFIX}" -evalue 1e-20 -num_threads "${THREADS}" \
+           -max_target_seqs 1 -outfmt "6 qseqid sacc pident length evalue bitscore stitle" > "${BLAST_TSV}"
+  fi
 fi
 
 # ---------- 3) Python post-processing: UniProt GO + GO-Slim ----------
@@ -299,6 +338,35 @@ final = final[desired_cols]
 
 final.to_csv(Path(OUTDIR) / "annotation_with_goslim.tsv", sep='\t', index=False)
 print(f"[DONE] Wrote:\n - {full_path}\n - {Path(OUTDIR) / 'annotation_with_goslim.tsv'}")
+
+# Generate summary report
+blast_hits = len(merged[merged['accession'].notna()])
+go_matches = len(merged[merged['go_ids'].notna() & (merged['go_ids'] != '')])
+goslim_matches = len(merged[merged['goslim_ids'].notna() & (merged['goslim_ids'] != '')])
+total_seqs = len(merged)
+
+# GO-Slim category counts for visualization
+goslim_counts = {}
+if goslim_matches > 0:
+    for _, row in merged[merged['goslim_names'].notna() & (merged['goslim_names'] != '')].iterrows():
+        terms = [x.strip() for x in str(row['goslim_names']).split(';') if x.strip()]
+        for term in terms:
+            goslim_counts[term] = goslim_counts.get(term, 0) + 1
+
+# Write summary stats for main script
+summary_stats = {
+    'total_sequences': total_seqs,
+    'blast_hits': blast_hits, 
+    'go_matches': go_matches,
+    'goslim_matches': goslim_matches,
+    'goslim_counts': goslim_counts
+}
+
+import json
+with open(Path(OUTDIR) / "summary_stats.json", 'w') as f:
+    json.dump(summary_stats, f)
+
+print(f"[INFO] Summary stats: {blast_hits}/{total_seqs} BLAST hits, {go_matches} GO annotations, {goslim_matches} GO-Slim mappings")
 PYCODE
 
 # Ensure Python deps (use a venv if you like)
@@ -309,11 +377,110 @@ def ensure(pkg):
         __import__(pkg)
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
-for p in ("requests","pandas","goatools"):
+for p in ("requests","pandas","goatools","matplotlib"):
     ensure(p)
 print("deps ok")
 PYCHK
 
 python3 "${PY}" "${BLAST_TSV}" "${OUTDIR}"
 
-echo "[OK] All done. See ${OUTDIR}/annotation_with_goslim.tsv"
+# ---------- Generate Summary Report ----------
+END_TIME=$(date +%s)
+END_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+DURATION=$((END_TIME - START_TIME))
+HOURS=$((DURATION / 3600))
+MINUTES=$(((DURATION % 3600) / 60))
+SECONDS=$((DURATION % 60))
+
+# Read summary stats from Python output
+if [[ -f "${OUTDIR}/summary_stats.json" ]]; then
+    # Extract stats using Python
+    python3 - <<SUMMARY_SCRIPT
+import json
+from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+
+# Load summary statistics
+with open("${OUTDIR}/summary_stats.json", 'r') as f:
+    stats = json.load(f)
+
+# Generate GO-Slim bar chart
+goslim_counts = stats.get('goslim_counts', {})
+if goslim_counts:
+    # Sort by count and take top 15
+    sorted_items = sorted(goslim_counts.items(), key=lambda x: x[1], reverse=True)[:15]
+    
+    if sorted_items:
+        terms, counts = zip(*sorted_items)
+        
+        plt.figure(figsize=(12, 8))
+        bars = plt.barh(range(len(terms)), counts, color='steelblue', alpha=0.7)
+        plt.yticks(range(len(terms)), [term[:50] + '...' if len(term) > 50 else term for term in terms])
+        plt.xlabel('Number of Sequences')
+        plt.title('Top GO-Slim Categories')
+        plt.gca().invert_yaxis()
+        plt.tight_layout()
+        plt.savefig("${OUTDIR}/goslim_chart.png", dpi=150, bbox_inches='tight')
+        print("[INFO] Generated GO-Slim chart: goslim_chart.png")
+
+# Generate summary markdown
+md_content = f"""# Annotation Summary Report
+
+## Job Information
+- **Input file**: $(basename "${QUERY}")
+- **Start time**: ${START_DATE}
+- **End time**: ${END_DATE}
+- **Duration**: ${HOURS}h ${MINUTES}m ${SECONDS}s
+- **CPUs used**: ${THREADS}
+- **Tool**: {"DIAMOND " if "${USE_DIAMOND}" == "true" else "BLAST+ "}{"BLASTP (protein)" if "${MODE}" == "blastp" else "BLASTX (nucleotide)"}
+
+## Results Overview
+- **Total sequences**: {stats['total_sequences']:,}
+- **BLAST hits found**: {stats['blast_hits']:,} ({100*stats['blast_hits']/stats['total_sequences']:.1f}%)
+- **GO annotations**: {stats['go_matches']:,} ({100*stats['go_matches']/stats['total_sequences']:.1f}%)
+- **GO-Slim mappings**: {stats['goslim_matches']:,} ({100*stats['goslim_matches']/stats['total_sequences']:.1f}%)
+
+## Output Files
+- **Main results**: annotation_with_goslim.tsv
+- **Full GO data**: annotation_full_go.tsv  
+- **Raw BLAST**: $(basename "${BLAST_TSV}")
+- **Processing script**: postprocess_uniprot_go.py
+
+"""
+
+if goslim_counts:
+    md_content += """## Top GO-Slim Categories
+
+| GO-Slim Term | Count |
+|--------------|-------|
+"""
+    for term, count in sorted(goslim_counts.items(), key=lambda x: x[1], reverse=True)[:15]:
+        md_content += f"| {term} | {count} |\n"
+    
+    md_content += f"""
+![GO-Slim Categories](goslim_chart.png)
+
+*Top 15 GO-Slim categories by sequence count*
+"""
+else:
+    md_content += "## GO-Slim Categories\n\nNo GO-Slim mappings found.\n"
+
+md_content += f"""
+## Performance
+- **BLAST throughput**: {stats['total_sequences']/max(1, ${DURATION}):.1f} sequences/second
+- **Annotation rate**: {stats['blast_hits']/max(1, ${DURATION}):.1f} hits/second
+
+---
+*Generated by blast2slim.sh on {END_DATE}*
+"""
+
+with open("${OUTDIR}/summary.md", 'w') as f:
+    f.write(md_content)
+
+print(f"[INFO] Generated summary report: summary.md")
+SUMMARY_SCRIPT
+fi
+
+echo "[OK] All done. See ${OUTDIR}/annotation_with_goslim.tsv and ${OUTDIR}/summary.md"
