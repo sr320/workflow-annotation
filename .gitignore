@@ -1,0 +1,23 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+## Annotation outputs (current)
+output/
+
+## Legacy output directories (pre "output/" consolidation)
+results/
+results*/
+run_*/
+**/run_20??????_*/
+run_url_test*/
+test_out*/
+machinery_run/
+
+# BLAST database cache
+blastdb/
+
+# Local test FASTA
+test_protein.faa
+test_40nt.fa

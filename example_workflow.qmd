@@ -1,0 +1,349 @@
+---
+title: "Protein Annotation with workflow-annotation"
+author: "Your Name"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    embed-resources: true
+  pdf:
+    toc: true
+    number-sections: true
+execute:
+  warning: false
+  message: false
+  cache: false
+---
+
+## Overview
+
+This document demonstrates how to use the `workflow-annotation` pipeline to annotate protein or nucleotide sequences with Swiss-Prot best hits, UniProt annotations, and GO-Slim terms.
+
+## Setup
+
+### Clone the Repository
+
+First, let's clone the workflow repository and navigate to it:
+
+```{bash}
+#| label: clone-repo
+#| eval: false
+git clone https://github.com/sr320/workflow-annotation.git
+cd workflow-annotation
+```
+
+### Check Requirements
+
+Verify that all required tools are available:
+
+```{bash}
+#| label: check-requirements
+#| eval: false
+# Check BLAST+ installation
+which makeblastdb blastx blastp
+
+# Check Python and required packages
+python3 -c "import requests, pandas, goatools; print('All packages available')"
+```
+
+If packages are missing, install them:
+
+```{bash}
+#| label: install-packages
+#| eval: false
+python3 -m pip install requests pandas goatools
+```
+
+## Example 1: Annotating Protein Sequences
+
+### Download Example Data
+
+Let's download a sample protein FASTA file:
+
+```{bash}
+#| label: download-proteins
+#| eval: false
+wget -O example_proteins.faa \
+  "https://raw.githubusercontent.com/urol-e5/timeseries_molecular/refs/heads/main/D-Apul/data/Machinery.fasta"
+
+# Check the file
+head -20 example_proteins.faa
+wc -l example_proteins.faa
+```
+
+### Run Protein Annotation
+
+Now let's annotate these protein sequences:
+
+```{bash}
+#| label: run-protein-annotation
+#| eval: false
+# Run the annotation pipeline
+bash blast2slim.sh -i example_proteins.faa --protein -o protein_example --threads 8
+
+# Check the output structure
+ls -la output/protein_example/run_*/
+```
+
+### Examine Results
+
+Let's look at the main output file:
+
+```{bash}
+#| label: check-protein-results
+#| eval: false
+# Find the latest run directory
+LATEST_RUN=$(ls -1t output/protein_example/run_* | head -1)
+echo "Latest run: $LATEST_RUN"
+
+# Look at the main results file
+head -5 "$LATEST_RUN/annotation_with_goslim.tsv"
+echo "---"
+tail -5 "$LATEST_RUN/annotation_with_goslim.tsv"
+
+# Count annotated sequences
+wc -l "$LATEST_RUN/annotation_with_goslim.tsv"
+```
+
+## Example 2: Annotating Nucleotide Sequences
+
+### Create Example Nucleotide Data
+
+For demonstration, let's create a small nucleotide FASTA file:
+
+```{bash}
+#| label: create-nucleotides
+#| eval: false
+cat > example_transcripts.fasta << 'EOF'
+>transcript_001
+ATGGCGAAGGTGCTGGACGAGCTGACCGAGGAGCTGCTGAAGGGCGACGAGGTGGTGATCGAG
+GTGACCGAGGGCGACGAGGTGGTGATCGAGGTGACCGAGGGCGACGAGGTGGTGATCGAG
+>transcript_002
+ATGGTGAAGGTGCTGGACGAGCTGACCGAGGAGCTGCTGAAGGGCGACGAGGTGGTGATCGAG
+GTGACCGAGGGCGACGAGGTGGTGATCGAGGTGACCGAGGGCGACGAGGTGGTGATCGAG
+>transcript_003
+ATGCTGAAGGTGCTGGACGAGCTGACCGAGGAGCTGCTGAAGGGCGACGAGGTGGTGATCGAG
+GTGACCGAGGGCGACGAGGTGGTGATCGAGGTGACCGAGGGCGACGAGGTGGTGATCGAG
+EOF
+
+# Check the file
+cat example_transcripts.fasta
+```
+
+### Run Nucleotide Annotation (BLASTX)
+
+```{bash}
+#| label: run-nucleotide-annotation
+#| eval: false
+# Run BLASTX annotation (default for nucleotide sequences)
+bash blast2slim.sh -i example_transcripts.fasta -o nucleotide_example --threads 4
+
+# Check results
+ls -la output/nucleotide_example/run_*/
+```
+
+## Data Analysis in R
+
+Now let's load and analyze the results in R:
+
+```{r}
+#| label: setup-r
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+```
+
+### Load Annotation Results
+
+```{r}
+#| label: load-data
+#| eval: false
+# Find the latest protein annotation results
+protein_files <- list.files("output/protein_example", 
+                           pattern = "annotation_with_goslim.tsv", 
+                           recursive = TRUE, 
+                           full.names = TRUE)
+
+if (length(protein_files) > 0) {
+  # Load the most recent results
+  protein_results <- read_tsv(protein_files[1], show_col_types = FALSE)
+  
+  cat("Loaded", nrow(protein_results), "annotated sequences\n")
+  cat("Columns:", ncol(protein_results), "\n")
+  
+  # Show structure
+  glimpse(protein_results)
+} else {
+  cat("No annotation results found. Please run the annotation pipeline first.\n")
+}
+```
+
+### Summary Statistics
+
+```{r}
+#| label: summary-stats
+#| eval: false
+if (exists("protein_results")) {
+  # Basic statistics
+  cat("=== Annotation Summary ===\n")
+  cat("Total sequences:", nrow(protein_results), "\n")
+  cat("Sequences with UniProt hits:", sum(!is.na(protein_results$accession)), "\n")
+  cat("Sequences with GO annotations:", sum(!is.na(protein_results$go_ids)), "\n")
+  cat("Sequences with GO-Slim terms:", sum(!is.na(protein_results$goslim_ids)), "\n")
+  
+  # Top organisms
+  cat("\n=== Top Organisms ===\n")
+  protein_results %>%
+    count(organism, sort = TRUE) %>%
+    filter(!is.na(organism)) %>%
+    head(10) %>%
+    kable()
+}
+```
+
+### GO-Slim Analysis
+
+```{r}
+#| label: goslim-analysis
+#| eval: false
+if (exists("protein_results")) {
+  # Analyze GO-Slim categories
+  goslim_counts <- protein_results %>%
+    filter(!is.na(goslim_names), goslim_names != "") %>%
+    separate_rows(goslim_names, sep = "; ") %>%
+    count(goslim_names, sort = TRUE) %>%
+    filter(goslim_names != "")
+  
+  cat("=== Top GO-Slim Categories ===\n")
+  print(kable(head(goslim_counts, 15)))
+  
+  # Plot top categories
+  if (nrow(goslim_counts) > 0) {
+    p <- goslim_counts %>%
+      head(15) %>%
+      ggplot(aes(x = reorder(goslim_names, n), y = n)) +
+      geom_col(fill = "steelblue", alpha = 0.7) +
+      coord_flip() +
+      labs(title = "Top GO-Slim Categories",
+           x = "GO-Slim Term",
+           y = "Number of Sequences") +
+      theme_minimal()
+    
+    print(p)
+  }
+}
+```
+
+### BLAST Statistics
+
+```{r}
+#| label: blast-stats
+#| eval: false
+if (exists("protein_results")) {
+  # BLAST hit quality
+  blast_stats <- protein_results %>%
+    filter(!is.na(pident)) %>%
+    summarise(
+      mean_identity = mean(pident, na.rm = TRUE),
+      median_identity = median(pident, na.rm = TRUE),
+      mean_evalue = mean(as.numeric(evalue), na.rm = TRUE),
+      sequences_with_hits = n()
+    )
+  
+  cat("=== BLAST Hit Quality ===\n")
+  cat("Mean percent identity:", round(blast_stats$mean_identity, 2), "%\n")
+  cat("Median percent identity:", round(blast_stats$median_identity, 2), "%\n")
+  cat("Mean E-value:", format(blast_stats$mean_evalue, scientific = TRUE), "\n")
+  
+  # Plot identity distribution
+  p2 <- protein_results %>%
+    filter(!is.na(pident)) %>%
+    ggplot(aes(x = pident)) +
+    geom_histogram(bins = 30, fill = "darkgreen", alpha = 0.7) +
+    labs(title = "Distribution of BLAST Percent Identity",
+         x = "Percent Identity (%)",
+         y = "Number of Sequences") +
+    theme_minimal()
+  
+  print(p2)
+}
+```
+
+## Output Files
+
+The pipeline generates several useful files:
+
+```{bash}
+#| label: list-outputs
+#| eval: false
+echo "=== Output Files ==="
+find output/ -name "*.tsv" -o -name "*.py" -o -name "*.obo" | head -10
+```
+
+### File Descriptions
+
+- **`annotation_with_goslim.tsv`**: Main results with GO-Slim terms
+- **`annotation_full_go.tsv`**: Results with full GO annotations  
+- **`*.blast.tsv`**: Raw BLAST results
+- **`postprocess_uniprot_go.py`**: Generated processing script
+- **`go-basic.obo`, `goslim_generic.obo`**: Ontology files
+
+## Advanced Usage
+
+### Batch Processing Multiple Files
+
+```{bash}
+#| label: batch-processing
+#| eval: false
+# Process multiple FASTA files
+mkdir -p input_data
+
+# Example: process all FASTA files in a directory
+for fasta_file in input_data/*.fasta; do
+  if [ -f "$fasta_file" ]; then
+    basename=$(basename "$fasta_file" .fasta)
+    echo "Processing $basename..."
+    bash blast2slim.sh -i "$fasta_file" -o "batch_${basename}" --threads 4
+  fi
+done
+```
+
+### Custom Database Location
+
+```{bash}
+#| label: custom-database
+#| eval: false
+# Use a shared database location
+mkdir -p /tmp/shared_blastdb
+bash blast2slim.sh -i example_proteins.faa --protein \
+  --dbdir /tmp/shared_blastdb -o custom_db_example
+```
+
+## Session Information
+
+```{r}
+#| label: session-info
+sessionInfo()
+```
+
+## Conclusion
+
+This workflow provides a streamlined approach to annotating sequences with:
+
+1. **Swiss-Prot best hits** via BLAST
+2. **UniProt protein annotations** via REST API
+3. **GO term mappings** to functional categories
+4. **GO-Slim terms** for high-level functional classification
+
+The output TSV files can be easily integrated into downstream analyses, visualization, and reporting workflows.
+
+---
+
+**Next Steps:**
+- Modify parameters for your specific needs
+- Integrate results with other omics data
+- Create publication-ready figures and tables
