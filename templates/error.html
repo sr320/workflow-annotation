@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Error{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="alert alert-error">
+        <h2 style="margin-bottom: 10px; border: none; padding-bottom: 0;">⚠️ Error</h2>
+        <p style="font-size: 16px; margin-top: 10px;">{{ error }}</p>
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">← Back to Home</a>
+    </div>
+</div>
+{% endblock %}

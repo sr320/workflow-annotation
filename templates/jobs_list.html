@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}All Jobs{% endblock %}
+
+{% block extra_css %}
+<style>
+    .jobs-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+    }
+    
+    .jobs-table th {
+        background: #2c3e50;
+        color: white;
+        padding: 12px;
+        text-align: left;
+        font-weight: 600;
+    }
+    
+    .jobs-table td {
+        padding: 12px;
+        border-bottom: 1px solid #ddd;
+    }
+    
+    .jobs-table tr:hover {
+        background: #f9f9f9;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-weight: 600;
+        font-size: 12px;
+    }
+    
+    .status-queued {
+        background: #f39c12;
+        color: white;
+    }
+    
+    .status-running {
+        background: #3498db;
+        color: white;
+    }
+    
+    .status-completed {
+        background: #27ae60;
+        color: white;
+    }
+    
+    .status-failed {
+        background: #e74c3c;
+        color: white;
+    }
+    
+    .job-link {
+        color: #3498db;
+        text-decoration: none;
+        font-weight: 600;
+    }
+    
+    .job-link:hover {
+        text-decoration: underline;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #777;
+    }
+    
+    .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>All Jobs</h2>
+    
+    {% if jobs %}
+    <table class="jobs-table">
+        <thead>
+            <tr>
+                <th>Job ID</th>
+                <th>Status</th>
+                <th>Input</th>
+                <th>Type</th>
+                <th>Created</th>
+                <th>Results</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('job_status', job_id=job.id) }}" class="job-link">
+                        {{ job.id }}
+                    </a>
+                </td>
+                <td>
+                    <span class="status-badge status-{{ job.status }}">
+                        {{ job.status.upper() }}
+                    </span>
+                </td>
+                <td>
+                    <span style="font-size: 12px;">{{ job.input_source[:50] }}{% if job.input_source|length > 50 %}...{% endif %}</span>
+                </td>
+                <td>
+                    {{ 'Protein' if job.is_protein else 'Nucleotide' }}
+                    <br>
+                    <small style="color: #777;">{{ 'DIAMOND' if job.use_diamond else 'BLAST+' }}</small>
+                </td>
+                <td style="font-size: 12px;">
+                    {{ job.created_time[:19] if job.created_time else 'N/A' }}
+                </td>
+                <td>
+                    {% if job.result_count is defined %}
+                        {{ job.result_count }} seqs
+                    {% elif job.status == 'completed' %}
+                        ✓
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📭</div>
+        <p><strong>No jobs yet</strong></p>
+        <p>Submit your first annotation job to get started</p>
+        <br>
+        <a href="{{ url_for('index') }}" class="btn">Submit Job</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
