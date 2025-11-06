@@ -21,3 +21,10 @@ blastdb/
 # Local test FASTA
 test_protein.faa
 test_40nt.fa
+
+# Web app
+uploads/
+*.pyc
+__pycache__/
+.env
+instance/

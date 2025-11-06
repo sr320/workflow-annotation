@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Submit Annotation Job{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Submit Annotation Job</h2>
+    
+    <form method="POST" action="{{ url_for('submit') }}" enctype="multipart/form-data" id="annotationForm">
+        <div class="form-group">
+            <label>Input Source</label>
+            <div class="radio-group">
+                <div class="radio-option">
+                    <input type="radio" id="input_url" name="input_type" value="url" checked onchange="toggleInputMethod()">
+                    <label for="input_url" style="margin-bottom: 0; font-weight: normal;">FASTA URL</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="input_file" name="input_type" value="file" onchange="toggleInputMethod()">
+                    <label for="input_file" style="margin-bottom: 0; font-weight: normal;">Upload File</label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-group" id="url-input-group">
+            <label for="fasta_url">FASTA URL</label>
+            <input type="text" 
+                   id="fasta_url" 
+                   name="fasta_url" 
+                   placeholder="https://example.com/sequences.fasta">
+            <p class="help-text">Enter the direct URL to a FASTA file (supports .fasta, .fa, .fas, .cds, .faa)</p>
+        </div>
+        
+        <div class="form-group" id="file-input-group" style="display: none;">
+            <label for="fasta_file">Upload FASTA File</label>
+            <input type="file" 
+                   id="fasta_file" 
+                   name="fasta_file" 
+                   accept=".fasta,.fa,.fas,.cds,.faa">
+            <p class="help-text">Upload a FASTA file (max 50MB, formats: .fasta, .fa, .fas, .cds, .faa)</p>
+        </div>
+        
+        <div class="form-group">
+            <label>Sequence Type</label>
+            <div class="radio-group">
+                <div class="radio-option">
+                    <input type="radio" id="nucleotide" name="sequence_type" value="nucleotide" checked>
+                    <label for="nucleotide" style="margin-bottom: 0; font-weight: normal;">Nucleotide (BLASTX)</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="protein" name="sequence_type" value="protein">
+                    <label for="protein" style="margin-bottom: 0; font-weight: normal;">Protein (BLASTP)</label>
+                </div>
+            </div>
+            <p class="help-text">Select nucleotide for DNA/RNA sequences, protein for amino acid sequences</p>
+        </div>
+        
+        <div class="form-group">
+            <div class="checkbox-group">
+                <input type="checkbox" id="use_diamond" name="use_diamond">
+                <label for="use_diamond" style="margin-bottom: 0; font-weight: normal;">
+                    Use DIAMOND (faster for large datasets)
+                </label>
+            </div>
+            <p class="help-text">DIAMOND is 10-20x faster than BLAST+ with similar sensitivity</p>
+        </div>
+        
+        <div class="form-group">
+            <label for="threads">CPU Threads</label>
+            <input type="number" 
+                   id="threads" 
+                   name="threads" 
+                   value="4" 
+                   min="1" 
+                   max="40" 
+                   step="1">
+            <p class="help-text">Number of CPU threads to use (1-40, default: 4)</p>
+        </div>
+        
+        <button type="submit">Start Annotation</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>How It Works</h2>
+    <ol>
+        <li><strong>Submit your sequences:</strong> Provide a FASTA file URL or upload a file</li>
+        <li><strong>Select parameters:</strong> Choose sequence type and performance options</li>
+        <li><strong>Processing:</strong> The workflow will:
+            <ul style="margin-top: 10px; margin-left: 20px;">
+                <li>Run BLAST/DIAMOND against Swiss-Prot database</li>
+                <li>Retrieve UniProt annotations via REST API</li>
+                <li>Map GO terms to GO-Slim categories</li>
+            </ul>
+        </li>
+        <li><strong>Download results:</strong> Get TSV files with annotations and a summary report</li>
+    </ol>
+</div>
+
+<div class="card">
+    <h2>Example URLs</h2>
+    <p>Try these example datasets:</p>
+    <ul style="margin-left: 20px; margin-top: 10px;">
+        <li>
+            <strong>Protein sequences:</strong><br>
+            <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px;">
+                https://raw.githubusercontent.com/urol-e5/timeseries_molecular/refs/heads/main/D-Apul/data/Machinery.fasta
+            </code>
+            <br><small style="color: #777;">(Remember to select "Protein" as sequence type)</small>
+        </li>
+    </ul>
+</div>
+
+<script>
+function toggleInputMethod() {
+    const urlRadio = document.getElementById('input_url');
+    const urlGroup = document.getElementById('url-input-group');
+    const fileGroup = document.getElementById('file-input-group');
+    const urlInput = document.getElementById('fasta_url');
+    const fileInput = document.getElementById('fasta_file');
+    
+    if (urlRadio.checked) {
+        urlGroup.style.display = 'block';
+        fileGroup.style.display = 'none';
+        urlInput.required = true;
+        fileInput.required = false;
+    } else {
+        urlGroup.style.display = 'none';
+        fileGroup.style.display = 'block';
+        urlInput.required = false;
+        fileInput.required = true;
+    }
+}
+
+// Initialize on page load
+toggleInputMethod();
+
+// Form validation
+document.getElementById('annotationForm').addEventListener('submit', function(e) {
+    const inputType = document.querySelector('input[name="input_type"]:checked').value;
+    
+    if (inputType === 'url') {
+        const url = document.getElementById('fasta_url').value.trim();
+        if (!url) {
+            e.preventDefault();
+            alert('Please enter a FASTA URL');
+            return false;
+        }
+        if (!url.match(/^https?:\/\/.+/)) {
+            e.preventDefault();
+            alert('Please enter a valid HTTP or HTTPS URL');
+            return false;
+        }
+    } else {
+        const file = document.getElementById('fasta_file').files[0];
+        if (!file) {
+            e.preventDefault();
+            alert('Please select a file to upload');
+            return false;
+        }
+    }
+});
+</script>
+{% endblock %}
