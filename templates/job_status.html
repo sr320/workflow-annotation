@@ -149,19 +149,19 @@
         <h3>Download Results</h3>
         <div class="download-links">
             {% if job.files.annotation %}
-            <a href="{{ url_for('download', job_id=job.id, file_type='annotation') }}" class="btn btn-success">
-                📊 Download Annotations (TSV)
+            <a href="{{ url_for('download', job_id=job.id, file_type='annotation') }}" class="btn btn-success" aria-label="Download Annotations TSV file">
+                <span aria-hidden="true">📊</span> Download Annotations (TSV)
             </a>
             {% endif %}
             
             {% if job.files.summary %}
-            <a href="{{ url_for('download', job_id=job.id, file_type='summary') }}" class="btn btn-secondary">
-                📝 Download Summary (MD)
+            <a href="{{ url_for('download', job_id=job.id, file_type='summary') }}" class="btn btn-secondary" aria-label="Download Summary Markdown file">
+                <span aria-hidden="true">📝</span> Download Summary (MD)
             </a>
             {% endif %}
             
-            <a href="{{ url_for('download', job_id=job.id, file_type='all') }}" class="btn">
-                📦 Download All Files (ZIP)
+            <a href="{{ url_for('download', job_id=job.id, file_type='all') }}" class="btn" aria-label="Download all files as ZIP">
+                <span aria-hidden="true">📦</span> Download All Files (ZIP)
             </a>
         </div>
         {% endif %}
