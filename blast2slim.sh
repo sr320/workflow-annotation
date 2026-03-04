@@ -259,7 +259,7 @@ obo_slim  = Path(OUTDIR) / "goslim_generic.obo"
 # download if missing
 import urllib.request
 if not obo_basic.exists():
-    urllib.request.urlretrieve("http://purl.obolibrary.org/obo/go/go-basic.obo", obo_basic.as_posix())
+    urllib.request.urlretrieve("https://purl.obolibrary.org/obo/go/go-basic.obo", obo_basic.as_posix())
 if not obo_slim.exists():
     urllib.request.urlretrieve("https://go.princeton.edu/GOTermMapper/goSlimFiles/goslim_generic.obo", obo_slim.as_posix())
 
