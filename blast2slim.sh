@@ -258,10 +258,16 @@ obo_slim  = Path(OUTDIR) / "goslim_generic.obo"
 
 # download if missing
 import urllib.request
+def _download_obo(url, dest):
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req) as response:
+        with open(dest, 'wb') as f:
+            f.write(response.read())
+
 if not obo_basic.exists():
-    urllib.request.urlretrieve("https://current.geneontology.org/ontology/go-basic.obo", obo_basic.as_posix())
+    _download_obo("https://current.geneontology.org/ontology/go-basic.obo", obo_basic.as_posix())
 if not obo_slim.exists():
-    urllib.request.urlretrieve("https://go.princeton.edu/GOTermMapper/goSlimFiles/goslim_generic.obo", obo_slim.as_posix())
+    _download_obo("https://go.princeton.edu/GOTermMapper/goSlimFiles/goslim_generic.obo", obo_slim.as_posix())
 
 obodag = GODag(obo_basic.as_posix(), optional_attrs={'relationship'})
 slimdag = GODag(obo_slim.as_posix(), optional_attrs={'relationship'})
