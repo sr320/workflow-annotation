@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}Job {{ job.id }} Status{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    
+    .status-queued {
+        background: #f39c12;
+        color: white;
+    }
+    
+    .status-running {
+        background: #3498db;
+        color: white;
+    }
+    
+    .status-completed {
+        background: #27ae60;
+        color: white;
+    }
+    
+    .status-failed {
+        background: #e74c3c;
+        color: white;
+    }
+    
+    .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #3498db;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 20px auto;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .job-details {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: 10px;
+        margin: 20px 0;
+    }
+    
+    .job-details dt {
+        font-weight: 600;
+        color: #555;
+    }
+    
+    .job-details dd {
+        color: #333;
+    }
+    
+    .download-links {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 20px;
+    }
+    
+    .log-output {
+        background: #f8f8f8;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 15px;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Job Status: {{ job.id }}</h2>
+    
+    <div class="job-details">
+        <dt>Status:</dt>
+        <dd>
+            <span class="status-badge status-{{ job.status }}">
+                {{ job.status.upper() }}
+            </span>
+        </dd>
+        
+        <dt>Input:</dt>
+        <dd>{{ job.input_source }}</dd>
+        
+        <dt>Sequence Type:</dt>
+        <dd>{{ 'Protein (BLASTP)' if job.is_protein else 'Nucleotide (BLASTX)' }}</dd>
+        
+        <dt>Tool:</dt>
+        <dd>{{ 'DIAMOND' if job.use_diamond else 'BLAST+' }}</dd>
+        
+        <dt>Threads:</dt>
+        <dd>{{ job.threads }}</dd>
+        
+        <dt>Created:</dt>
+        <dd>{{ job.created_time }}</dd>
+        
+        {% if job.start_time %}
+        <dt>Started:</dt>
+        <dd>{{ job.start_time }}</dd>
+        {% endif %}
+        
+        {% if job.end_time %}
+        <dt>Completed:</dt>
+        <dd>{{ job.end_time }}</dd>
+        {% endif %}
+        
+        {% if job.result_count is defined %}
+        <dt>Results:</dt>
+        <dd>{{ job.result_count }} annotated sequences</dd>
+        {% endif %}
+    </div>
+    
+    {% if job.status == 'queued' or job.status == 'running' %}
+        <div class="alert alert-info">
+            {% if job.status == 'queued' %}
+                <strong>Queued:</strong> Your job is waiting to start...
+            {% else %}
+                <strong>Running:</strong> Your annotation is in progress. This may take several minutes depending on the dataset size.
+            {% endif %}
+        </div>
+        <div class="spinner"></div>
+        <p style="text-align: center; color: #777;">
+            This page will auto-refresh every 5 seconds
+        </p>
+    {% elif job.status == 'completed' %}
+        <div class="alert alert-success">
+            <strong>Success!</strong> Your annotation is complete. Download the results below.
+        </div>
+        
+        {% if job.files %}
+        <h3>Download Results</h3>
+        <div class="download-links">
+            {% if job.files.annotation %}
+            <a href="{{ url_for('download', job_id=job.id, file_type='annotation') }}" class="btn btn-success" aria-label="Download Annotations TSV file">
+                <span aria-hidden="true">📊</span> Download Annotations (TSV)
+            </a>
+            {% endif %}
+            
+            {% if job.files.summary %}
+            <a href="{{ url_for('download', job_id=job.id, file_type='summary') }}" class="btn btn-secondary" aria-label="Download Summary Markdown file">
+                <span aria-hidden="true">📝</span> Download Summary (MD)
+            </a>
+            {% endif %}
+            
+            <a href="{{ url_for('download', job_id=job.id, file_type='all') }}" class="btn" aria-label="Download all files as ZIP">
+                <span aria-hidden="true">📦</span> Download All Files (ZIP)
+            </a>
+        </div>
+        {% endif %}
+    {% elif job.status == 'failed' %}
+        <div class="alert alert-error">
+            <strong>Failed:</strong> The annotation job encountered an error.
+            {% if job.error %}
+            <br><br>Error: {{ job.error }}
+            {% endif %}
+        </div>
+        
+        {% if job.stderr %}
+        <h3>Error Output</h3>
+        <div class="log-output">{{ job.stderr }}</div>
+        {% endif %}
+    {% endif %}
+    
+    <div style="margin-top: 30px;">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">← Submit New Job</a>
+        <a href="{{ url_for('list_jobs') }}" class="btn btn-secondary">View All Jobs</a>
+    </div>
+</div>
+
+{% if job.status == 'queued' or job.status == 'running' %}
+<script>
+    // Auto-refresh every 5 seconds if job is still running
+    setTimeout(function() {
+        window.location.reload();
+    }, 5000);
+</script>
+{% endif %}
+{% endblock %}

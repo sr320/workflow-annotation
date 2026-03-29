@@ -2,6 +2,35 @@
 
 A comprehensive bash script that annotates nucleotide or protein FASTA sequences with Swiss-Prot best hits, UniProt protein names, full Gene Ontology (GO) annotations, and GO-Slim terms.
 
+## 🌐 Web Application
+
+**NEW!** This workflow is now available as a web application! Users can submit FASTA URLs or upload files directly through a browser interface.
+
+### Quick Start (Web App)
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start the web application
+bash start_webapp.sh
+# OR
+python app.py
+```
+
+Then open http://localhost:5000 in your browser.
+
+**Features:**
+- 📤 Submit jobs via URL or file upload
+- ⚙️ Configure parameters (sequence type, DIAMOND/BLAST+, threads)
+- 📊 Monitor job progress in real-time
+- 💾 Download results (TSV, summary, or ZIP)
+- 📋 View job history
+
+**Deployment:** See [WEB_DEPLOYMENT.md](WEB_DEPLOYMENT.md) for production deployment instructions (Docker, Heroku, AWS, etc.)
+
+---
+
 ## Script Overview
 
 The `blast2slim.sh` script is a self-contained pipeline that:   
